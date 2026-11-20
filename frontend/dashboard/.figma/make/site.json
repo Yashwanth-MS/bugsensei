@@ -1,0 +1,11 @@
+{
+  "title": "BugSensei — Autonomous Bug Detection & Repair Dashboard",
+  "description": "Detects and explains Python bugs, proposes patches, and verifies fixes for developers with automated scans, regression tests, and clear review controls.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,0 +1,40 @@
+# Environment variables
+.env
+backend/.env
+*.env
+
+# Python Virtual Environments
+venv/
+venv311/
+venv_new/
+.venv/
+env/
+
+# Byte-compiled / optimized / cache files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+frontend/dashboard/node_modules/
+frontend/dashboard/BugSensei-Antigravity.zip
+node_modules/
+
+# Production frontend dashboard dist MUST NOT be ignored for Render deployment
+# dist/
+build/
+*.egg-info/
+
+# OS and logs
+.DS_Store
+*.log
+
+# Reports
+reports/*.json
+!reports/.gitkeep
+backend/reports/*.json
+!backend/reports/.gitkeep

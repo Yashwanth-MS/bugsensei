@@ -1,0 +1,2300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BugSensei — Autonomous Python Bug Detection &amp; Repair</title>
+<meta name="description" content="BugSensei: Autonomous Python bug detection, root-cause reasoning, minimal diffs, and sandbox regression proof.">
+
+<!-- Exact Fonts via @font-face -->
+<style>
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3oQIwlBFgsAXHNk.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ibmplexmono/v20/-F63fjptAgt5VM-kVkqdyU8n1i8q131nj-o.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/ibmplexmono/v20/-F6qfjptAgt5VM-kVkqdyU8n3twJwlBFgsAXHNk.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/schibstedgrotesk/v7/Jqz55SSPQuCQF3t8uOwiUL-taUTtap9GayojdSFO.woff2) format('woff2');
+}
+
+/* ═══════════════════════════════════════════════
+   ROOT & COLOR SYSTEM
+   ═══════════════════════════════════════════════ */
+:root {
+  --bg: #efece6;
+  --ink: #141414;
+  --dim-ink: rgba(20, 20, 20, 0.5);
+  --faint-ink: rgba(20, 20, 20, 0.14);
+  --grid-line: rgba(20, 20, 20, 0.09);
+  --brand-gradient: conic-gradient(from 200deg, #ffb347, #ff8a3d 18%, #ff5a5f 34%, #ff3d8b 50%, #ff5a5f 66%, #ff8a3d 82%, #ffb347);
+  --linear-gradient: linear-gradient(135deg, #ffb347, #ff8a3d 25%, #ff5a5f 60%, #ff3d8b 100%);
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'Schibsted Grotesk', sans-serif;
+  --col: 4.5%;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+
+/* ═══════════════════════════════════════════════
+   FIXED THREE.JS BACKGROUND CANVAS
+   ═══════════════════════════════════════════════ */
+#webgl-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Page wrapper sits above the 3D canvas */
+.page-content {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* ═══════════════════════════════════════════════
+   FIXED CHROME: GRID GUIDES
+   ═══════════════════════════════════════════════ */
+.grid-guides {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.grid-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--grid-line);
+}
+.grid-line.col-1 { left: 4.5%; }
+.grid-line.col-2 { left: 50%; }
+.grid-line.col-3 { left: 83%; }
+
+/* ═══════════════════════════════════════════════
+   TOP BAR (30px)
+   ═══════════════════════════════════════════════ */
+.top-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  background: var(--ink);
+  color: #efece6;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  z-index: 100;
+  transition: transform 0.5s cubic-bezier(0.6, 0, 0.2, 1);
+}
+.top-bar.hidden {
+  transform: translateY(-100%);
+}
+.top-bar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: #efece6;
+  transition: opacity 0.2s;
+}
+.top-bar-link:hover { opacity: 0.85; }
+.top-bar-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.top-bar-status.offline {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+.top-bar-close {
+  color: #efece6;
+  font-size: 14px;
+  opacity: 0.6;
+  padding: 4px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.top-bar-close:hover { opacity: 1; }
+
+/* ═══════════════════════════════════════════════
+   STICKY NAV (52px)
+   ═══════════════════════════════════════════════ */
+.nav {
+  position: fixed;
+  top: 30px;
+  left: 0;
+  right: 0;
+  height: 52px;
+  background: rgba(239, 236, 230, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--grid-line);
+  z-index: 99;
+  display: grid;
+  grid-template-columns: minmax(240px, 17%) 1fr 12% 17%;
+  align-items: center;
+  transition: top 0.5s cubic-bezier(0.6, 0, 0.2, 1);
+}
+.nav.pinned {
+  top: 0;
+}
+
+/* Nav Cell 1: Logo */
+.nav-logo {
+  padding-left: 4.5vw;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--sans);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.nav-logo-icon {
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--brand-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-logo-inner {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+.nav-logo-eye {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+/* Nav Cell 2: Menu */
+.nav-menu {
+  display: flex;
+  gap: 28px;
+  padding-left: 36px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim-ink);
+}
+.nav-menu a {
+  transition: color 0.2s;
+  cursor: pointer;
+}
+.nav-menu a:hover {
+  color: var(--ink);
+}
+
+/* Nav Cell 3: Utility (API Docs) */
+.nav-utility {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--grid-line);
+  border-right: 1px solid var(--grid-line);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim-ink);
+}
+.nav-utility a {
+  transition: color 0.2s;
+}
+.nav-utility a:hover {
+  color: var(--ink);
+}
+
+/* Nav Cell 4: Launch Button */
+.nav-action {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+}
+.nav-btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 4px;
+  border: 1px solid var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  position: relative;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+}
+.nav-btn::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 4px;
+  padding: 1px;
+  background: var(--brand-gradient);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  clip-path: polygon(0 0, 70% 0, 70% 40%, 0 40%);
+  pointer-events: none;
+}
+.nav-btn:hover {
+  background: var(--ink);
+  color: #efece6;
+  transform: translateY(-1px);
+}
+
+/* ═══════════════════════════════════════════════
+   SCROLL-ACTIVATED FLOATING CTA "TRY BUGSENSEI"
+   ═══════════════════════════════════════════════ */
+.floating-cta {
+  position: fixed;
+  bottom: 32px;
+  right: calc(17% + 24px);
+  z-index: 95;
+  height: 42px;
+  padding: 0 22px;
+  background: var(--ink);
+  color: #efece6;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(20, 20, 20, 0.2);
+  opacity: 0;
+  transform: translateY(18px);
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.35s ease, background 0.2s;
+  cursor: pointer;
+}
+.floating-cta.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.floating-cta:hover {
+  background: #232323;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(20, 20, 20, 0.28);
+}
+
+/* ═══════════════════════════════════════════════
+   RIGHT RAIL (270px tall dot column & indicator)
+   ═══════════════════════════════════════════════ */
+.right-rail {
+  position: fixed;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 270px;
+  width: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 90;
+  pointer-events: auto;
+}
+.rail-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+}
+.rail-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--dim-ink);
+  opacity: 0.3;
+}
+.rail-indicator {
+  position: absolute;
+  top: 0;
+  left: -80px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+  transition: transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  cursor: pointer;
+}
+.rail-indicator-dial {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-indicator-dial::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ff5a5f;
+}
+.rail-menu-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--dim-ink);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════
+   SCROLL REVEAL UTILITY (.rv)
+   ═══════════════════════════════════════════════ */
+.rv {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 1s cubic-bezier(0.2, 0.7, 0.2, 1),
+              transform 1s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.rv.in-view {
+  opacity: 1;
+  transform: translateY(0);
+}
+.rv-del-1 { transition-delay: 0.1s; }
+.rv-del-2 { transition-delay: 0.2s; }
+.rv-del-3 { transition-delay: 0.3s; }
+.rv-del-4 { transition-delay: 0.4s; }
+
+/* ═══════════════════════════════════════════════
+   SECTION 1: INTRO (100vh)
+   ═══════════════════════════════════════════════ */
+.section-intro {
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 42px quote tab above prompt box */
+.prompt-quote-tab {
+  position: absolute;
+  left: 4.5%;
+  top: calc(25% - 42px);
+  width: 42px;
+  height: 42px;
+  background: var(--bg);
+  border: 1px solid var(--grid-line);
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1;
+  z-index: 3;
+}
+
+/* Prompt Box */
+.prompt-box {
+  position: absolute;
+  left: 4.5%;
+  top: 25%;
+  width: 28%;
+  min-width: 310px;
+  padding: 16px 20px;
+  background: rgba(239, 236, 230, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--ink);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  z-index: 3;
+}
+.prompt-text {
+  min-height: 48px;
+  display: inline;
+}
+.prompt-caret {
+  display: inline-block;
+  width: 6px;
+  height: 11px;
+  background: var(--ink);
+  vertical-align: middle;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.prompt-upcoming {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--grid-line);
+  font-size: 9.5px;
+  color: var(--dim-ink);
+  opacity: 0.65;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Horizontal Rule from prompt box to 83% */
+.intro-hairline {
+  position: absolute;
+  top: 25%;
+  left: calc(4.5% + 28%);
+  right: 17%;
+  height: 1px;
+  background: var(--grid-line);
+  z-index: 2;
+}
+
+/* Feature List (under rule, aligned to 83% guide) */
+.intro-features {
+  position: absolute;
+  top: calc(25% + 14px);
+  right: 17%;
+  width: 23%;
+  display: flex;
+  flex-direction: column;
+  z-index: 3;
+}
+.feature-row {
+  height: 21px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--grid-line);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  position: relative;
+}
+.feature-row.dim {
+  color: var(--dim-ink);
+}
+.feature-row::before {
+  content: '';
+  position: absolute;
+  left: 18%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ff5a5f;
+}
+
+/* Bottom-Left Hero Headline - Stretched & Aligned to Left */
+.intro-hero {
+  position: absolute;
+  bottom: 6%;
+  left: 4.5%;
+  z-index: 3;
+}
+.intro-eyebrow {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--dim-ink);
+  margin-bottom: 14px;
+}
+.headline-box-1 {
+  display: inline-block;
+  padding: 10px 32px;
+  border: 2.5px solid #ff8a3d;
+  background: rgba(255, 138, 61, 0.04);
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: clamp(48px, 6.2vw, 102px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
+  margin-bottom: 10px;
+  box-shadow: 0 8px 30px rgba(255, 138, 61, 0.1);
+  transition: transform 0.25s ease;
+}
+.headline-box-2 {
+  display: inline-block;
+  padding: 10px 32px;
+  border: 2.5px solid #ff5a5f;
+  background: rgba(255, 90, 95, 0.04);
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: clamp(48px, 6.2vw, 102px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  box-shadow: 0 8px 30px rgba(255, 90, 95, 0.1);
+  transition: transform 0.25s ease;
+}
+
+/* Sub-line */
+.intro-subline {
+  position: absolute;
+  bottom: 3.6%;
+  left: calc(62% + 18px);
+  max-width: 320px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--dim-ink);
+  z-index: 3;
+}
+
+/* Scroll link at bottom right */
+.intro-scroll {
+  position: absolute;
+  bottom: 4%;
+  right: 17%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding: 6px 12px;
+  border: 1px solid var(--grid-line);
+  border-radius: 4px;
+  z-index: 3;
+  animation: bob 2s ease-in-out infinite;
+  cursor: pointer;
+}
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+/* Bottom hairline */
+.intro-bottom-rule {
+  position: absolute;
+  bottom: 14%;
+  left: 50%;
+  right: 0;
+  height: 1px;
+  background: var(--grid-line);
+  z-index: 2;
+}
+
+/* ═══════════════════════════════════════════════
+   SECTION 2: PRODUCT (100vh)
+   ═══════════════════════════════════════════════ */
+.section-product {
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  padding-top: 80px;
+}
+
+/* Auto-sliding Tab Carousel Strip */
+.tab-carousel-wrapper {
+  position: absolute;
+  top: 100px;
+  left: 4.5%;
+  right: 0;
+  height: 74px;
+  overflow: hidden;
+  border-top: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+  background: rgba(239, 236, 230, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 3;
+}
+.tab-carousel-track {
+  display: flex;
+  height: 100%;
+  transition: transform 0.9s cubic-bezier(0.65, 0, 0.2, 1);
+}
+.carousel-tab {
+  width: 33vw;
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  border-right: 1px solid var(--grid-line);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint-ink);
+  transition: color 0.4s, background 0.4s;
+  cursor: pointer;
+  position: relative;
+}
+.carousel-tab-num {
+  font-size: 13px;
+  font-weight: 500;
+  width: 48px;
+  flex-shrink: 0;
+  color: var(--dim-ink);
+}
+.carousel-tab-label {
+  flex: 1;
+}
+.carousel-tab.active {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.7);
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+.carousel-tab.active .carousel-tab-num {
+  color: #ff5a5f;
+}
+
+/* Capability Details Panel (Card) */
+.product-detail-card {
+  position: absolute;
+  top: 210px;
+  left: 4.5%;
+  width: 420px;
+  max-width: 38vw;
+  padding: 24px 28px;
+  background: rgba(239, 236, 230, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  z-index: 3;
+}
+.detail-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #ff5a5f;
+  margin-bottom: 8px;
+}
+.detail-title {
+  font-family: var(--sans);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+.detail-body {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dim-ink);
+  margin-bottom: 16px;
+}
+.detail-code {
+  background: var(--ink);
+  color: #a3e635;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-x: auto;
+}
+
+/* Bottom-Left Headline */
+.product-headline {
+  position: absolute;
+  bottom: 8%;
+  left: 4.5%;
+  max-width: 42vw;
+  z-index: 3;
+}
+.product-headline-dots {
+  font-family: var(--mono);
+  font-size: 18px;
+  color: #ff5a5f;
+  margin-bottom: 4px;
+}
+.product-headline-box {
+  display: inline-block;
+  padding: 6px 20px;
+  border: 1px solid var(--ink);
+  border-radius: 20px;
+  font-family: var(--sans);
+  font-size: clamp(24px, 2.6vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin-bottom: 8px;
+  background: rgba(239, 236, 230, 0.85);
+}
+.product-headline-sub {
+  font-family: var(--sans);
+  font-size: clamp(26px, 2.8vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════
+   SECTION 3: REVIEWS (100vh)
+   ═══════════════════════════════════════════════ */
+.section-reviews {
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  padding-top: 80px;
+}
+
+/* Header Strip (60px) */
+.reviews-strip {
+  position: absolute;
+  top: 100px;
+  left: 4.5%;
+  right: 17%;
+  height: 60px;
+  border-bottom: 1px solid var(--grid-line);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 3;
+  background: rgba(239, 236, 230, 0.7);
+  backdrop-filter: blur(4px);
+  padding: 0 12px;
+}
+.reviews-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim-ink);
+}
+.reviews-avatar-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid rgba(52, 199, 89, 0.45);
+  box-shadow: 0 0 16px rgba(52, 199, 89, 0.25);
+  background: #0d0f12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.reviews-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.reviews-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.reviews-name {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.reviews-role {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim-ink);
+}
+
+/* Quote Block */
+.reviews-quote-block {
+  position: absolute;
+  top: 24%;
+  left: 4.5%;
+  width: 38vw;
+  max-width: 520px;
+  z-index: 3;
+  transition: opacity 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+              transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reviews-quote-block.anim-out {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.reviews-quote {
+  font-family: var(--sans);
+  font-size: clamp(20px, 2.3vw, 38px);
+  line-height: 1.25;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-bottom: 28px;
+}
+
+/* Try For Yourself CTA */
+.reviews-try-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 14px;
+  border-left: 2px solid #ff5a5f;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.2s, color 0.2s;
+}
+.reviews-try-cta:hover {
+  transform: translateX(4px);
+  color: #ff5a5f;
+}
+
+/* Bottom Controls (← →) */
+.reviews-controls {
+  position: absolute;
+  bottom: 8%;
+  left: 4.5%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 3;
+}
+.review-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--ink);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.review-btn:hover {
+  background: var(--ink);
+  color: #efece6;
+  transform: scale(1.05);
+}
+
+/* Ghost Preview to right of 83% guide */
+.reviews-ghost {
+  position: absolute;
+  top: 24%;
+  left: calc(83% + 24px);
+  width: 20vw;
+  opacity: 0.12;
+  font-family: var(--sans);
+  font-size: 22px;
+  line-height: 1.3;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ═══════════════════════════════════════════════
+   FOOTER (30vh)
+   ═══════════════════════════════════════════════ */
+.footer {
+  height: 30vh;
+  border-top: 1px solid var(--grid-line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg);
+  position: relative;
+  z-index: 3;
+}
+.footer-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--dim-ink);
+}
+.footer-cta {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding: 10px 24px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.footer-cta:hover {
+  background: var(--ink);
+  color: #efece6;
+  transform: translateY(-2px);
+}
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE MOBILE (<= 900px)
+   ═══════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .grid-guides,
+  .nav-menu,
+  .nav-utility,
+  .right-rail,
+  .intro-features,
+  .intro-hairline,
+  .reviews-ghost {
+    display: none !important;
+  }
+
+  .nav {
+    grid-template-columns: 1fr auto;
+    padding: 0 16px;
+  }
+  .nav-action { padding: 0; }
+
+  .section-intro, .section-product, .section-reviews {
+    height: auto;
+    min-height: 100vh;
+    padding: 90px 18px 40px;
+    position: relative;
+  }
+
+  .prompt-quote-tab {
+    left: 18px;
+    top: 70px;
+  }
+  .prompt-box {
+    left: 18px;
+    top: 110px;
+    width: calc(100% - 36px);
+    background: rgba(239, 236, 230, 0.88);
+  }
+
+  .intro-hero {
+    position: static;
+    margin-top: 260px;
+    padding: 16px;
+    background: rgba(239, 236, 230, 0.88);
+    border-radius: 8px;
+  }
+  .headline-box-1, .headline-box-2 {
+    font-size: 38px;
+    padding: 6px 14px;
+  }
+
+  .intro-subline {
+    position: static;
+    margin-top: 16px;
+    padding: 0 16px;
+    max-width: 100%;
+  }
+
+  .intro-scroll {
+    position: static;
+    margin: 24px 16px 0;
+  }
+
+  /* Product Section Mobile */
+  .tab-carousel-wrapper {
+    position: static;
+    left: 0;
+    right: 0;
+    margin-top: 20px;
+  }
+  .carousel-tab {
+    width: 70vw;
+  }
+  .product-detail-card {
+    position: static;
+    width: 100%;
+    margin-top: 24px;
+  }
+  .product-headline {
+    position: static;
+    margin-top: 40px;
+    padding: 16px;
+    background: rgba(239, 236, 230, 0.88);
+    border-radius: 8px;
+  }
+
+  /* Reviews Section Mobile */
+  .reviews-strip {
+    position: static;
+    margin-top: 20px;
+    left: 0;
+    right: 0;
+    width: 100%;
+  }
+  .reviews-quote-block {
+    position: static;
+    width: 100%;
+    margin-top: 24px;
+    padding: 16px;
+    background: rgba(239, 236, 230, 0.88);
+    border-radius: 8px;
+  }
+  .reviews-quote {
+    font-size: 22px;
+  }
+  .reviews-controls {
+    position: static;
+    margin-top: 24px;
+  }
+
+  .floating-cta {
+    right: 18px;
+    bottom: 18px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<!-- ════════════════════════════════════════════════
+     FIXED 3D WEBGL CANVAS
+     ════════════════════════════════════════════════ -->
+<canvas id="webgl-canvas"></canvas>
+
+<!-- ════════════════════════════════════════════════
+     FIXED CHROME: 3 GUIDES
+     ════════════════════════════════════════════════ -->
+<div class="grid-guides" aria-hidden="true">
+  <div class="grid-line col-1"></div>
+  <div class="grid-line col-2"></div>
+  <div class="grid-line col-3"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     TOP BAR (30px)
+     ════════════════════════════════════════════════ -->
+<div class="top-bar" id="topBar">
+  <div class="top-bar-link" id="topBarLink">
+    <span class="top-bar-status" id="healthStatusDot"></span>
+    <span>NEW: BugSensei V1 Is Live — Autonomous Python Bug Detection, Minimal Diffs &amp; Sandbox Proof ↗</span>
+  </div>
+  <div class="top-bar-close" id="topBarClose" title="Close announcement">×</div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     STICKY NAV (52px)
+     ════════════════════════════════════════════════ -->
+<nav class="nav" id="stickyNav">
+  <!-- Cell 1: Logo -->
+  <div class="nav-logo">
+    <div class="nav-logo-icon">
+      <div class="nav-logo-inner">
+        <div class="nav-logo-eye"></div>
+        <div class="nav-logo-eye"></div>
+      </div>
+    </div>
+    <span>BUGSENSEI</span>
+  </div>
+
+  <!-- Cell 2: Menu -->
+  <div class="nav-menu">
+    <a href="#intro">Scanner</a>
+    <a href="#product">Pipeline</a>
+    <a href="#product">Sandbox</a>
+    <a href="#reviews">Reviews</a>
+    <a id="navDemoLink">Demo Projects</a>
+  </div>
+
+  <!-- Cell 3: API Docs -->
+  <div class="nav-utility">
+    <a href="/docs" target="_blank" rel="noopener">API Docs ↗</a>
+  </div>
+
+  <!-- Cell 4: Launch CTA -->
+  <div class="nav-action">
+    <button class="nav-btn" id="navLaunchBtn">
+      <span>••</span> LAUNCH BUGSENSEI
+    </button>
+  </div>
+</nav>
+
+<!-- ════════════════════════════════════════════════
+     RIGHT RAIL (270px)
+     ════════════════════════════════════════════════ -->
+<div class="right-rail">
+  <div class="rail-dots">
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+    <div class="rail-dot"></div>
+  </div>
+
+  <div class="rail-indicator" id="railIndicator">
+    <div class="rail-indicator-dial"></div>
+    <span id="railLabel">INTRO</span>
+  </div>
+
+  <div class="rail-menu-label" id="railMenuLabel">≡ MENU</div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     FLOATING "TRY BUGSENSEI" CTA (window.scrollY > 180)
+     ════════════════════════════════════════════════ -->
+<button class="floating-cta" id="floatingCta">
+  <span>••</span> TRY BUGSENSEI ↗
+</button>
+
+<!-- ════════════════════════════════════════════════
+     MAIN CONTENT
+     ════════════════════════════════════════════════ -->
+<div class="page-content">
+
+  <!-- ─────────────────────────────────────────────
+       SECTION 1: INTRO (100vh)
+       ───────────────────────────────────────────── -->
+  <section class="section-intro" id="intro">
+    <!-- Prompt tab with bold serif quote -->
+    <div class="prompt-quote-tab rv rv-del-1">“</div>
+
+    <!-- Prompt Box -->
+    <div class="prompt-box rv rv-del-1">
+      <span class="prompt-text" id="promptText"></span><span class="prompt-caret"></span>
+      <div class="prompt-upcoming" id="promptUpcoming">NEXT: EXPLAIN WHY DIVIDE_APP CRASHES</div>
+    </div>
+
+    <!-- Hairline to 83% -->
+    <div class="intro-hairline"></div>
+
+    <!-- Feature list under hairline -->
+    <div class="intro-features rv rv-del-2">
+      <div class="feature-row">AST + PYLINT + BANDIT</div>
+      <div class="feature-row">3-TIER AI FALLBACK</div>
+      <div class="feature-row">DOCKER TEST SANDBOX</div>
+      <div class="feature-row dim">MINIMAL DIFFS &amp; AUDIT</div>
+    </div>
+
+    <!-- Bottom-Left Hero Headline -->
+    <div class="intro-hero rv rv-del-3">
+      <div class="intro-eyebrow">AUTONOMOUS PYTHON REPAIR</div>
+      <div>
+        <div class="headline-box-1">BugSensei</div>
+      </div>
+      <div>
+        <div class="headline-box-2">Code Medic</div>
+      </div>
+    </div>
+
+    <!-- Sub-line -->
+    <div class="intro-subline rv rv-del-4">
+      Autonomous Python bug detection, root-cause reasoning, and regression-safe patching.
+    </div>
+
+    <!-- Scroll link -->
+    <div class="intro-scroll" id="introScrollBtn">
+      <span>SCROLL</span>
+      <span>↓</span>
+    </div>
+
+    <!-- Bottom rule -->
+    <div class="intro-bottom-rule"></div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────
+       SECTION 2: PRODUCT (100vh)
+       ───────────────────────────────────────────── -->
+  <section class="section-product" id="product">
+    <!-- Tab Carousel Strip -->
+    <div class="tab-carousel-wrapper rv rv-del-1">
+      <div class="tab-carousel-track" id="tabTrack">
+        <!-- 10 Tabs -->
+        <div class="carousel-tab active" data-tab="0">
+          <span class="carousel-tab-num">01</span>
+          <span class="carousel-tab-label">AST Logic Checker</span>
+        </div>
+        <div class="carousel-tab" data-tab="1">
+          <span class="carousel-tab-num">02</span>
+          <span class="carousel-tab-label">Pylint Static Analysis</span>
+        </div>
+        <div class="carousel-tab" data-tab="2">
+          <span class="carousel-tab-num">03</span>
+          <span class="carousel-tab-label">Bandit Security Scanner</span>
+        </div>
+        <div class="carousel-tab" data-tab="3">
+          <span class="carousel-tab-num">04</span>
+          <span class="carousel-tab-label">Gemini → Groq → OpenRouter AI</span>
+        </div>
+        <div class="carousel-tab" data-tab="4">
+          <span class="carousel-tab-num">05</span>
+          <span class="carousel-tab-label">Root Cause &amp; Trigger Input</span>
+        </div>
+        <div class="carousel-tab" data-tab="5">
+          <span class="carousel-tab-num">06</span>
+          <span class="carousel-tab-label">Minimal Unified Diff Patcher</span>
+        </div>
+        <div class="carousel-tab" data-tab="6">
+          <span class="carousel-tab-num">07</span>
+          <span class="carousel-tab-label">Docker Isolated Pytest Sandbox</span>
+        </div>
+        <div class="carousel-tab" data-tab="7">
+          <span class="carousel-tab-num">08</span>
+          <span class="carousel-tab-label">Before / After Regression Proof</span>
+        </div>
+        <div class="carousel-tab" data-tab="8">
+          <span class="carousel-tab-num">09</span>
+          <span class="carousel-tab-label">Accept / Reject Developer Control</span>
+        </div>
+        <div class="carousel-tab" data-tab="9">
+          <span class="carousel-tab-num">10</span>
+          <span class="carousel-tab-label">JSON Audit Change History</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Capability Detail Card -->
+    <div class="product-detail-card rv rv-del-2" id="productCard">
+      <div class="detail-tag" id="cardTag">CAPABILITY 01</div>
+      <div class="detail-title" id="cardTitle">AST Logic Checker</div>
+      <div class="detail-body" id="cardBody">
+        Walks Python's Abstract Syntax Tree to pinpoint zero-division vulnerabilities, mutable list arguments, bare except traps, and identity comparisons without executing untrusted code.
+      </div>
+      <pre class="detail-code" id="cardCode">ast.walk(tree) → BinOp(op=Div()) with no zero check</pre>
+    </div>
+
+    <!-- Bottom-Left Headline -->
+    <div class="product-headline rv rv-del-3">
+      <div class="product-headline-dots">··</div>
+      <div>
+        <div class="product-headline-box">Your Gateway</div>
+      </div>
+      <div class="product-headline-sub">To Self-Healing Code</div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────
+       SECTION 3: REVIEWS (100vh)
+       ───────────────────────────────────────────── -->
+  <section class="section-reviews" id="reviews">
+    <!-- Header Strip -->
+    <div class="reviews-strip rv rv-del-1">
+      <span class="reviews-tag" id="reviewsTag">TSTMNL [01]</span>
+      <div class="reviews-avatar-box" id="avatarBox">
+        <img src="/green_vortex.jpg" alt="Green Vortex Logo" class="reviews-avatar-img" id="avatarImg" />
+      </div>
+      <div class="reviews-meta">
+        <span class="reviews-name" id="reviewerName">Green Vortex</span>
+        <span class="reviews-role" id="reviewerRole">Founder of BugSensei</span>
+      </div>
+    </div>
+
+    <!-- Quote Block -->
+    <div class="reviews-quote-block rv rv-del-2" id="quoteBlock">
+      <div class="reviews-quote" id="quoteText">
+        “Debugging shouldn't stop at line numbers. BugSensei explains the root cause, writes a surgical diff, and proves it passes pytest in a sandbox.”
+      </div>
+      <div class="reviews-try-cta" id="reviewTryCta">
+        Try for yourself (Click Here) →
+      </div>
+    </div>
+
+    <!-- Bottom Controls -->
+    <div class="reviews-controls rv rv-del-3">
+      <button class="review-btn" id="reviewPrevBtn" aria-label="Previous review">←</button>
+      <button class="review-btn" id="reviewNextBtn" aria-label="Next review">→</button>
+    </div>
+
+    <!-- Ghost Preview (at 10% ink to right of 83% guide) -->
+    <div class="reviews-ghost" id="reviewsGhost">
+      “Having static AST, Bandit security checks, and a 3-tier free LLM fallback means our demo and CI checks never break even without API keys.”
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────
+       FOOTER (30vh)
+       ───────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer-title">BUGSENSEI · 2026</div>
+    <div class="footer-cta" id="footerCta">
+      OPEN SCANNER DASHBOARD ↗
+    </div>
+  </footer>
+
+</div>
+
+<!-- ════════════════════════════════════════════════
+     THREE.JS 0.160.0 SCRIPT (ES MODULE)
+     ════════════════════════════════════════════════ -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ─────────────────────────────────────────────
+// 1. CONFIGURATION
+// ─────────────────────────────────────────────
+const DASHBOARD_URL = "/dashboard";
+
+// ─────────────────────────────────────────────
+// 2. CTA WIRING
+// ─────────────────────────────────────────────
+const launchDashboard = () => {
+  window.location.href = DASHBOARD_URL;
+};
+
+document.getElementById('navLaunchBtn').addEventListener('click', launchDashboard);
+document.getElementById('floatingCta').addEventListener('click', launchDashboard);
+document.getElementById('reviewTryCta').addEventListener('click', launchDashboard);
+document.getElementById('footerCta').addEventListener('click', launchDashboard);
+document.getElementById('topBarLink').addEventListener('click', launchDashboard);
+document.getElementById('navDemoLink').addEventListener('click', launchDashboard);
+
+// Top bar dismiss
+const topBar = document.getElementById('topBar');
+const stickyNav = document.getElementById('stickyNav');
+document.getElementById('topBarClose').addEventListener('click', (e) => {
+  e.stopPropagation();
+  topBar.classList.add('hidden');
+  stickyNav.classList.add('pinned');
+});
+
+// Scroll link
+document.getElementById('introScrollBtn').addEventListener('click', () => {
+  document.getElementById('product').scrollIntoView({ behavior: 'smooth' });
+});
+
+// ─────────────────────────────────────────────
+// 3. HEALTH CHECK (/health)
+// ─────────────────────────────────────────────
+async function checkHealth() {
+  const dot = document.getElementById('healthStatusDot');
+  try {
+    const res = await fetch('/health', { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      dot.classList.remove('offline');
+    } else {
+      dot.classList.add('offline');
+    }
+  } catch (err) {
+    dot.classList.add('offline');
+  }
+}
+checkHealth();
+
+// ─────────────────────────────────────────────
+// 4. TOP BAR & FLOATING CTA SCROLL LISTENER
+// ─────────────────────────────────────────────
+const floatingCta = document.getElementById('floatingCta');
+window.addEventListener('scroll', () => {
+  const y = window.scrollY;
+
+  // Top bar slide up
+  if (y > 40) {
+    topBar.classList.add('hidden');
+    stickyNav.classList.add('pinned');
+  } else {
+    topBar.classList.remove('hidden');
+    stickyNav.classList.remove('pinned');
+  }
+
+  // Floating CTA visibility
+  if (y > 180) {
+    floatingCta.classList.add('visible');
+  } else {
+    floatingCta.classList.remove('visible');
+  }
+}, { passive: true });
+
+// ─────────────────────────────────────────────
+// 5. INTERSECTION OBSERVER FOR REVEALS (.rv)
+// ─────────────────────────────────────────────
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('in-view');
+    }
+  });
+}, { threshold: 0.15 });
+
+document.querySelectorAll('.rv').forEach(el => revealObserver.observe(el));
+
+// ─────────────────────────────────────────────
+// 6. SECTION INDICATOR (RIGHT RAIL)
+// ─────────────────────────────────────────────
+const sections = [
+  { id: 'intro', label: 'INTRO', pos: '0%' },
+  { id: 'product', label: 'PRODUCT', pos: '31%' },
+  { id: 'reviews', label: 'REVIEWS', pos: '62%' }
+];
+const railIndicator = document.getElementById('railIndicator');
+const railLabel = document.getElementById('railLabel');
+
+const sectionObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const current = sections.find(s => s.id === entry.target.id);
+      if (current) {
+        railIndicator.style.top = current.pos;
+        railLabel.textContent = current.label;
+      }
+    }
+  });
+}, { threshold: 0.5 });
+
+sections.forEach(s => {
+  const el = document.getElementById(s.id);
+  if (el) sectionObserver.observe(el);
+});
+
+// Click rail indicator or label to cycle sections
+railIndicator.addEventListener('click', () => {
+  const current = railLabel.textContent;
+  const idx = sections.findIndex(s => s.label === current);
+  const next = sections[(idx + 1) % sections.length];
+  document.getElementById(next.id).scrollIntoView({ behavior: 'smooth' });
+});
+document.getElementById('railMenuLabel').addEventListener('click', () => {
+  document.getElementById('product').scrollIntoView({ behavior: 'smooth' });
+});
+
+// ─────────────────────────────────────────────
+// 7. PROMPT BOX TYPING ANIMATION
+// ─────────────────────────────────────────────
+const prompts = [
+  "Scan marks_calculator.py for hidden logic bugs and missing input checks.",
+  "Explain why divide_app crashes and generate a minimal unified diff.",
+  "Audit user_auth.py with Bandit for hardcoded secrets and weak MD5 hashes.",
+  "Run pytest inside the Docker sandbox and prove zero regressions."
+];
+
+let pIdx = 0;
+let cIdx = 0;
+let isDeleting = false;
+const pTextEl = document.getElementById('promptText');
+const pUpcomingEl = document.getElementById('promptUpcoming');
+
+function updateUpcoming() {
+  const nextIdx = (pIdx + 1) % prompts.length;
+  pUpcomingEl.textContent = `NEXT: ${prompts[nextIdx].toUpperCase()}`;
+}
+updateUpcoming();
+
+function typeLoop() {
+  const current = prompts[pIdx];
+
+  if (!isDeleting) {
+    pTextEl.textContent = current.substring(0, cIdx + 1);
+    cIdx++;
+
+    if (cIdx >= current.length) {
+      isDeleting = true;
+      setTimeout(typeLoop, 2600); // hold for 2.6s
+      return;
+    }
+    setTimeout(typeLoop, 38);
+  } else {
+    cIdx = Math.max(0, cIdx - 2);
+    pTextEl.textContent = current.substring(0, cIdx);
+
+    if (cIdx <= 0) {
+      isDeleting = false;
+      pIdx = (pIdx + 1) % prompts.length;
+      updateUpcoming();
+      setTimeout(typeLoop, 250); // pause 250ms
+      return;
+    }
+    setTimeout(typeLoop, 14);
+  }
+}
+typeLoop();
+
+// ─────────────────────────────────────────────
+// 8. PRODUCT SECTION AUTO-SLIDING TAB CAROUSEL
+// ─────────────────────────────────────────────
+const capabilities = [
+  {
+    tag: "CAPABILITY 01",
+    title: "AST Logic Checker",
+    body: "Walks Python's Abstract Syntax Tree to pinpoint zero-division vulnerabilities, mutable list arguments, bare except traps, and identity comparisons without executing untrusted code.",
+    code: "ast.walk(tree) → BinOp(op=Div()) with no zero check"
+  },
+  {
+    tag: "CAPABILITY 02",
+    title: "Pylint Static Analysis",
+    body: "Executes targeted Pylint sub-processes configured for fatal errors, undefined variables, and dangerous defaults, outputting normalized structured JSON findings.",
+    code: "$ pylint --enable=E,F,W0102,W0702 --output-format=json"
+  },
+  {
+    tag: "CAPABILITY 03",
+    title: "Bandit Security Scanner",
+    body: "Deep AST security auditing identifying hardcoded secrets, weak cryptographic hashes (MD5/SHA1), SQL injection vectors, and unsanitized exec calls.",
+    code: "$ bandit -f json -r ./src  # flags B105, B303, B608"
+  },
+  {
+    tag: "CAPABILITY 04",
+    title: "Gemini → Groq → OpenRouter AI",
+    body: "Three-tier LLM fallback chain. Rapid primary scanning via Groq (qwen3.8), automated secondary routing via OpenRouter, and deep reasoning via Gemini.",
+    code: "for provider in [Groq, OpenRouter, Gemini]: if result: return"
+  },
+  {
+    tag: "CAPABILITY 05",
+    title: "Root Cause & Trigger Input",
+    body: "Every bug card pairs a technical post-mortem explaining why the failure occurs with exact reproducible trigger parameters and boundary cases.",
+    code: 'trigger_input: "Pass denominator = 0 into divide(10, 0)"'
+  },
+  {
+    tag: "CAPABILITY 06",
+    title: "Minimal Unified Diff Patcher",
+    body: "Applies surgical, rule-based patches for recognized bug signatures, with LLM-assisted zero-shot patch synthesis for bespoke logic bugs.",
+    code: "@@ -2,1 +2,3 @@\n+   if b == 0:\n+       raise ValueError()"
+  },
+  {
+    tag: "CAPABILITY 07",
+    title: "Docker Isolated Pytest Sandbox",
+    body: "Runs pytest suites in headless, resource-capped subprocesses or detached Docker containers with zero network access and automatic tmpfs cleanup.",
+    code: "docker run --rm --network=none -v /tmp/code:/code pytest"
+  },
+  {
+    tag: "CAPABILITY 08",
+    title: "Before / After Regression Proof",
+    body: "Compares test execution matrices pre- and post-patch. Patches are automatically flagged as regression-safe only if zero existing test suites fail.",
+    code: "Test Results: 2 passed before → 3 passed after (SAFE)"
+  },
+  {
+    tag: "CAPABILITY 09",
+    title: "Accept / Reject Developer Control",
+    body: "Human-in-the-loop controls allow engineering teams to accept surgical diffs, reject false positives, or mark complex findings for manual code review.",
+    code: "POST /decision/BUG-001  { action: 'ACCEPTED' }"
+  },
+  {
+    tag: "CAPABILITY 10",
+    title: "JSON Audit Change History",
+    body: "Every developer decision, timestamp, review note, and patch application is recorded in an immutable change log for SOC2 and ISO compliance.",
+    code: "GET /history → [{ bug_id: 'BUG-001', status: 'ACCEPTED' }]"
+  }
+];
+
+const tabTrack = document.getElementById('tabTrack');
+const tabs = document.querySelectorAll('.carousel-tab');
+const cardTag = document.getElementById('cardTag');
+const cardTitle = document.getElementById('cardTitle');
+const cardBody = document.getElementById('cardBody');
+const cardCode = document.getElementById('cardCode');
+
+let activeTabIdx = 0;
+let tabInterval = null;
+
+function setTab(idx) {
+  activeTabIdx = idx % capabilities.length;
+  tabs.forEach((t, i) => {
+    t.classList.toggle('active', i === activeTabIdx);
+  });
+  tabTrack.style.transform = `translateX(-${activeTabIdx * 33}vw)`;
+
+  const cap = capabilities[activeTabIdx];
+  cardTag.textContent = cap.tag;
+  cardTitle.textContent = cap.title;
+  cardBody.textContent = cap.body;
+  cardCode.textContent = cap.code;
+}
+
+tabs.forEach((t, i) => {
+  t.addEventListener('click', () => {
+    setTab(i);
+    clearInterval(tabInterval);
+    tabInterval = setInterval(() => setTab(activeTabIdx + 1), 2400);
+  });
+});
+
+tabInterval = setInterval(() => setTab(activeTabIdx + 1), 2400);
+
+// ─────────────────────────────────────────────
+// 9. REVIEWS CAROUSEL
+// ─────────────────────────────────────────────
+const reviews = [
+  {
+    tag: "TSTMNL [01]",
+    name: "Green Vortex",
+    role: "Founder of BugSensei",
+    quote: "“Debugging shouldn't stop at line numbers. BugSensei explains the root cause, writes a surgical diff, and proves it passes pytest in a sandbox.”",
+    ghost: "“Having static AST, Bandit security checks, and a 3-tier free LLM fallback means our demo and CI checks never break even without API keys.”"
+  },
+  {
+    tag: "TSTMNL [02]",
+    name: "Rhea Okafor",
+    role: "Lead Backend Engineer, Tessel Systems",
+    quote: "“Having static AST, Bandit security checks, and a 3-tier free LLM fallback means our demo and CI checks never break even without API keys.”",
+    ghost: "“Seeing before-and-after regression counts alongside Accept/Reject audit logs turned automated patching into something our team actually trusts.”"
+  },
+  {
+    tag: "TSTMNL [03]",
+    name: "Mara Elling",
+    role: "CTO, Northline Labs",
+    quote: "“Seeing before-and-after regression counts alongside Accept/Reject audit logs turned automated patching into something our team actually trusts.”",
+    ghost: "“Debugging shouldn't stop at line numbers. BugSensei explains the root cause, writes a surgical diff, and proves it passes pytest in a sandbox.”"
+  }
+];
+
+let revIdx = 0;
+const reviewsTag = document.getElementById('reviewsTag');
+const reviewerName = document.getElementById('reviewerName');
+const reviewerRole = document.getElementById('reviewerRole');
+const quoteBlock = document.getElementById('quoteBlock');
+const quoteText = document.getElementById('quoteText');
+const reviewsGhost = document.getElementById('reviewsGhost');
+
+function swapReview(idx) {
+  revIdx = (idx + reviews.length) % reviews.length;
+  quoteBlock.classList.add('anim-out');
+
+  setTimeout(() => {
+    const r = reviews[revIdx];
+    reviewsTag.textContent = r.tag;
+    reviewerName.textContent = r.name;
+    reviewerRole.textContent = r.role;
+    quoteText.textContent = r.quote;
+    reviewsGhost.textContent = r.ghost;
+    quoteBlock.classList.remove('anim-out');
+  }, 450);
+}
+
+document.getElementById('reviewPrevBtn').addEventListener('click', () => swapReview(revIdx - 1));
+document.getElementById('reviewNextBtn').addEventListener('click', () => swapReview(revIdx + 1));
+
+// ─────────────────────────────────────────────
+// 10. THREE.JS 3D CERAMIC ROBOT
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('webgl-canvas');
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  alpha: true
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+
+// Camera: 30° FOV
+const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 1.1, 11.6);
+camera.lookAt(0, 0.55, 0);
+
+// Environment
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+const roomEnv = new RoomEnvironment();
+scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+roomEnv.dispose();
+
+// Lights
+const hemiLight = new THREE.HemisphereLight(0xfff6ee, 0xd9d2c8, 0.7);
+scene.add(hemiLight);
+
+const keyLight = new THREE.DirectionalLight(0xfff3e6, 1.7);
+keyLight.position.set(-3, 5, 4);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.width = 1024;
+keyLight.shadow.mapSize.height = 1024;
+keyLight.shadow.radius = 6;
+keyLight.shadow.bias = -0.0005;
+scene.add(keyLight);
+
+const rimLight = new THREE.DirectionalLight(0xfff0e6, 1.2);
+rimLight.position.set(4, 2, -4);
+scene.add(rimLight);
+
+const pointLight = new THREE.PointLight(0xff9a6a, 2.2, 6);
+pointLight.position.set(-3.2, 1.2, 0.6);
+scene.add(pointLight);
+
+// Materials
+const shellMat = new THREE.MeshPhysicalMaterial({
+  color: 0xeeebe6,
+  roughness: 0.38,
+  clearcoat: 0.45,
+  clearcoatRoughness: 0.3,
+  envMapIntensity: 0.9
+});
+
+const shellLightMat = new THREE.MeshPhysicalMaterial({
+  color: 0xf8f6f2,
+  roughness: 0.34,
+  clearcoat: 0.45,
+  clearcoatRoughness: 0.3,
+  envMapIntensity: 0.9
+});
+
+const jointMat = new THREE.MeshStandardMaterial({
+  color: 0x1b1b1f,
+  roughness: 0.55,
+  metalness: 0.3,
+  envMapIntensity: 0.6
+});
+
+const deepDarkMat = new THREE.MeshStandardMaterial({
+  color: 0x0f0f12,
+  roughness: 0.6,
+  metalness: 0.2
+});
+
+const pedestalMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2928,
+  roughness: 0.9
+});
+
+// Gradient Ring Canvas Texture (512x512)
+const gradCanvas = document.createElement('canvas');
+gradCanvas.width = 512;
+gradCanvas.height = 512;
+const gradCtx = gradCanvas.getContext('2d');
+const conic = gradCtx.createConicGradient(Math.PI * 1.1, 256, 256);
+conic.addColorStop(0.00, '#ff3d8b');
+conic.addColorStop(0.18, '#ff5a5f');
+conic.addColorStop(0.34, '#ff8a3d');
+conic.addColorStop(0.50, '#ffb347');
+conic.addColorStop(0.66, '#ff8a3d');
+conic.addColorStop(0.82, '#ff5a5f');
+conic.addColorStop(1.00, '#ff3d8b');
+gradCtx.fillStyle = conic;
+gradCtx.fillRect(0, 0, 512, 512);
+
+const gradTexture = new THREE.CanvasTexture(gradCanvas);
+const ringMat = new THREE.MeshPhysicalMaterial({
+  map: gradTexture,
+  emissiveMap: gradTexture,
+  emissive: 0xffffff,
+  emissiveIntensity: 0.22,
+  roughness: 0.5,
+  clearcoat: 0.35,
+  envMapIntensity: 0.9
+});
+
+// Live Face Canvas (512x512)
+const faceCanvas = document.createElement('canvas');
+faceCanvas.width = 512;
+faceCanvas.height = 512;
+const faceCtx = faceCanvas.getContext('2d');
+const faceTexture = new THREE.CanvasTexture(faceCanvas);
+
+const faceMat = new THREE.MeshPhysicalMaterial({
+  color: 0x0a0a0c,
+  roughness: 0.1,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.1,
+  emissiveMap: faceTexture,
+  emissive: 0xffffff,
+  emissiveIntensity: 1.6
+});
+
+// ── ROBOT HIERARCHY ──
+const robot = new THREE.Group();
+scene.add(robot);
+
+// Head pivot group at y = 0.78
+const headPivot = new THREE.Group();
+headPivot.position.y = 0.78;
+robot.add(headPivot);
+
+const headGroup = new THREE.Group();
+headGroup.position.y = 0.78; // center +0.78 above pivot
+headPivot.add(headGroup);
+
+// Skull
+const skullGeo = new RoundedBoxGeometry(1.5, 1.42, 1.3, 4, 0.2);
+const skull = new THREE.Mesh(skullGeo, shellMat);
+skull.castShadow = true;
+headGroup.add(skull);
+
+// Dark back block with scattered circuit bars
+const backGeo = new THREE.BoxGeometry(1.28, 1.14, 0.9);
+const backMesh = new THREE.Mesh(backGeo, jointMat);
+backMesh.position.z = -0.35;
+headGroup.add(backMesh);
+
+for (let i = 0; i < 26; i++) {
+  const barW = 0.08 + Math.random() * 0.14;
+  const barGeo = new THREE.BoxGeometry(barW, 0.02, 0.02);
+  const barMesh = new THREE.Mesh(barGeo, deepDarkMat);
+  barMesh.position.set(
+    (Math.random() - 0.5) * 1.1,
+    (Math.random() - 0.5) * 0.9,
+    -0.81
+  );
+  headGroup.add(barMesh);
+}
+
+// Extruded face ring frame (outer 1.5x1.44, inner 1.08x1.02, depth 0.1)
+const frameShape = new THREE.Shape();
+frameShape.moveTo(-0.75, -0.72);
+frameShape.lineTo(0.75, -0.72);
+frameShape.lineTo(0.75, 0.72);
+frameShape.lineTo(-0.75, 0.72);
+frameShape.closePath();
+
+const holePath = new THREE.Path();
+holePath.moveTo(-0.54, -0.51);
+holePath.lineTo(0.54, -0.51);
+holePath.lineTo(0.54, 0.51);
+holePath.lineTo(-0.54, 0.51);
+holePath.closePath();
+frameShape.holes.push(holePath);
+
+const frameGeo = new THREE.ExtrudeGeometry(frameShape, {
+  depth: 0.1,
+  bevelEnabled: true,
+  bevelSegments: 3,
+  steps: 1,
+  bevelSize: 0.03,
+  bevelThickness: 0.03
+});
+const frameMesh = new THREE.Mesh(frameGeo, ringMat);
+frameMesh.position.z = 0.58;
+headGroup.add(frameMesh);
+
+// Inner shell-light bezel at z = 0.62
+const bezelGeo = new RoundedBoxGeometry(1.04, 0.98, 0.05, 3, 0.08);
+const bezel = new THREE.Mesh(bezelGeo, shellLightMat);
+bezel.position.z = 0.62;
+headGroup.add(bezel);
+
+// Glossy face screen at z = 0.66
+const screenGeo = new RoundedBoxGeometry(0.9, 0.84, 0.04, 3, 0.08);
+const screen = new THREE.Mesh(screenGeo, faceMat);
+screen.position.z = 0.66;
+headGroup.add(screen);
+
+// Ear cylinders
+const earGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.15, 24);
+const leftEar = new THREE.Mesh(earGeo, jointMat);
+leftEar.rotation.z = Math.PI / 2;
+leftEar.position.set(-0.82, 0, 0);
+headGroup.add(leftEar);
+
+const rightEar = new THREE.Mesh(earGeo, jointMat);
+rightEar.rotation.z = Math.PI / 2;
+rightEar.position.set(0.82, 0, 0);
+headGroup.add(rightEar);
+
+// Right ear cable loop (half-torus)
+const cableGeo = new THREE.TorusGeometry(0.25, 0.02, 12, 24, Math.PI);
+const cable = new THREE.Mesh(cableGeo, deepDarkMat);
+cable.position.set(0.85, -0.15, 0);
+cable.rotation.y = Math.PI / 2;
+headGroup.add(cable);
+
+// Neck
+const neckGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.35, 24);
+const neck = new THREE.Mesh(neckGeo, jointMat);
+neck.position.y = 0.65;
+robot.add(neck);
+
+// Torso
+const torsoGeo = new RoundedBoxGeometry(1.22, 1.12, 0.92, 4, 0.24);
+const torso = new THREE.Mesh(torsoGeo, shellMat);
+torso.position.y = -0.05;
+torso.castShadow = true;
+torso.receiveShadow = true;
+robot.add(torso);
+
+// Shell-light chest-top slab
+const slabGeo = new RoundedBoxGeometry(1.08, 0.25, 0.85, 3, 0.06);
+const slab = new THREE.Mesh(slabGeo, shellLightMat);
+slab.position.set(0, 0.38, 0.05);
+robot.add(slab);
+
+// 3 Glowing Chest LEDs
+const ledGeo = new THREE.SphereGeometry(0.04, 16, 16);
+const ledColors = [0xff8a3d, 0xff5a5f, 0xff3d8b];
+ledColors.forEach((col, idx) => {
+  const ledMat = new THREE.MeshStandardMaterial({
+    color: col,
+    emissive: col,
+    emissiveIntensity: 1.8
+  });
+  const led = new THREE.Mesh(ledGeo, ledMat);
+  led.position.set((idx - 1) * 0.14, 0.38, 0.49);
+  robot.add(led);
+});
+
+// Vertical slots on chest
+const slotGeo = new THREE.BoxGeometry(0.06, 0.45, 0.05);
+const leftSlot = new THREE.Mesh(slotGeo, deepDarkMat);
+leftSlot.position.set(-0.25, -0.05, 0.47);
+const rightSlot = new THREE.Mesh(slotGeo, deepDarkMat);
+rightSlot.position.set(0.25, -0.05, 0.47);
+robot.add(leftSlot, rightSlot);
+
+// Pelvis
+const pelvisGeo = new RoundedBoxGeometry(0.85, 0.3, 0.65, 3, 0.08);
+const pelvis = new THREE.Mesh(pelvisGeo, jointMat);
+pelvis.position.y = -0.72;
+robot.add(pelvis);
+
+// Arms
+function createArm(side) {
+  const arm = new THREE.Group();
+  arm.position.set(side * 0.78, 0.28, 0);
+
+  // Shoulder ball
+  const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), jointMat);
+  arm.add(shoulder);
+
+  // Upper arm
+  const upper = new THREE.Mesh(new RoundedBoxGeometry(0.28, 0.55, 0.28, 3, 0.06), shellMat);
+  upper.position.set(side * 0.06, -0.32, 0);
+  upper.castShadow = true;
+  arm.add(upper);
+
+  // Elbow
+  const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), jointMat);
+  elbow.position.set(side * 0.06, -0.65, 0);
+  arm.add(elbow);
+
+  // Forearm
+  const forearm = new THREE.Group();
+  forearm.position.set(side * 0.06, -0.65, 0);
+  forearm.rotation.x = -0.35;
+
+  const lower = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.5, 0.24, 3, 0.05), shellMat);
+  lower.position.y = -0.28;
+  forearm.add(lower);
+
+  // Hand block & thumb
+  const hand = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.22, 0.18, 3, 0.04), shellLightMat);
+  hand.position.y = -0.58;
+  forearm.add(hand);
+
+  const thumb = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.14, 0.08, 2, 0.02), shellLightMat);
+  thumb.position.set(side * -0.12, -0.54, 0.06);
+  forearm.add(thumb);
+
+  arm.add(forearm);
+  arm.rotation.z = side * -0.16;
+  return arm;
+}
+
+const leftArm = createArm(-1);
+const rightArm = createArm(1);
+robot.add(leftArm, rightArm);
+
+// Legs
+function createLeg(side) {
+  const leg = new THREE.Group();
+  leg.position.set(side * 0.32, -0.85, 0);
+
+  const hip = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), jointMat);
+  leg.add(hip);
+
+  const thigh = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.58, 0.3, 3, 0.06), shellMat);
+  thigh.position.y = -0.35;
+  thigh.castShadow = true;
+  leg.add(thigh);
+
+  const knee = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), jointMat);
+  knee.position.y = -0.7;
+  leg.add(knee);
+
+  const shin = new THREE.Mesh(new RoundedBoxGeometry(0.26, 0.5, 0.26, 3, 0.05), shellMat);
+  shin.position.y = -1.0;
+  leg.add(shin);
+
+  const foot = new THREE.Mesh(new RoundedBoxGeometry(0.32, 0.14, 0.45, 3, 0.04), shellLightMat);
+  foot.position.set(0, -1.3, 0.08);
+  foot.castShadow = true;
+  leg.add(foot);
+
+  return leg;
+}
+
+const leftLeg = createLeg(-1);
+const rightLeg = createLeg(1);
+robot.add(leftLeg, rightLeg);
+
+// Pedestal
+const pedestalGeo = new THREE.BoxGeometry(1.7, 1.6, 1.7);
+const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
+pedestal.position.y = -2.22;
+pedestal.receiveShadow = true;
+scene.add(pedestal);
+
+// ─────────────────────────────────────────────
+// 11. FACE CANVAS ANIMATION (EYES & QUOTE MODE)
+// ─────────────────────────────────────────────
+let eyeBlinkProgress = 0;
+let isEyeBlinking = false;
+let nextBlinkTime = performance.now() + 3000;
+let quoteModeAlpha = 0;
+
+function drawFaceCanvas(time, scrollP) {
+  faceCtx.fillStyle = '#0a0a0c';
+  faceCtx.fillRect(0, 0, 512, 512);
+
+  // Quote mode cross-fade if scroll progress > 1.55
+  if (scrollP > 1.55) {
+    quoteModeAlpha = Math.min(1.0, quoteModeAlpha + 0.05);
+  } else {
+    quoteModeAlpha = Math.max(0.0, quoteModeAlpha - 0.05);
+  }
+
+  // Draw Eyes (Alpha: 1 - quoteModeAlpha)
+  if (quoteModeAlpha < 0.98) {
+    faceCtx.save();
+    faceCtx.globalAlpha = 1.0 - quoteModeAlpha;
+    faceCtx.shadowColor = 'rgba(255, 255, 255, 0.85)';
+    faceCtx.shadowBlur = 18;
+    faceCtx.fillStyle = '#ffffff';
+
+    // Blink calculation
+    if (time > nextBlinkTime && !isEyeBlinking) {
+      isEyeBlinking = true;
+      eyeBlinkProgress = 0;
+    }
+
+    let squash = 1.0;
+    if (isEyeBlinking) {
+      eyeBlinkProgress += 0.1;
+      squash = 0.1 + 0.9 * Math.abs(Math.sin(eyeBlinkProgress * Math.PI));
+      if (eyeBlinkProgress >= 1.0) {
+        isEyeBlinking = false;
+        nextBlinkTime = time + 2500 + Math.random() * 3000;
+      }
+    }
+
+    // Left eye (196, 262) rx=30, ry=38
+    faceCtx.beginPath();
+    faceCtx.ellipse(196, 262, 30, Math.max(3, 38 * squash), 0, 0, Math.PI * 2);
+    faceCtx.fill();
+
+    // Right eye (316, 252) rx=30, ry=38
+    faceCtx.beginPath();
+    faceCtx.ellipse(316, 252, 30, Math.max(3, 38 * squash), 0, 0, Math.PI * 2);
+    faceCtx.fill();
+
+    faceCtx.restore();
+  }
+
+  // Draw Quote Mode (Large serif quote centered at 256, 400)
+  if (quoteModeAlpha > 0.02) {
+    faceCtx.save();
+    faceCtx.globalAlpha = quoteModeAlpha;
+    faceCtx.shadowColor = 'rgba(255, 255, 255, 0.85)';
+    faceCtx.shadowBlur = 18;
+    faceCtx.fillStyle = '#ffffff';
+    faceCtx.font = '900 560px "Arial Black", sans-serif';
+    faceCtx.textAlign = 'center';
+    faceCtx.textBaseline = 'middle';
+    faceCtx.fillText('“', 256, 400);
+    faceCtx.restore();
+  }
+
+  faceTexture.needsUpdate = true;
+}
+
+// ─────────────────────────────────────────────
+// 12. POINTER PARALLAX & MOUSE TRACKING
+// ─────────────────────────────────────────────
+let targetMouseX = 0, targetMouseY = 0;
+let smoothMouseX = 0, smoothMouseY = 0;
+
+window.addEventListener('mousemove', (e) => {
+  targetMouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+  targetMouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+}, { passive: true });
+
+// ─────────────────────────────────────────────
+// 13. SCROLL CHOREOGRAPHY LERP
+// ─────────────────────────────────────────────
+let smoothScrollP = 0;
+
+function getScrollProgress() {
+  const maxScroll = document.body.scrollHeight - window.innerHeight;
+  return maxScroll > 0 ? (window.scrollY / maxScroll) * 2.0 : 0;
+}
+
+// Cubic ease-in-out
+function easeInOutCubic(x) {
+  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
+// ─────────────────────────────────────────────
+// 14. RESIZE HANDLER
+// ─────────────────────────────────────────────
+function onWindowResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', onWindowResize);
+
+// ─────────────────────────────────────────────
+// 15. MAIN ANIMATION LOOP (60fps)
+// ─────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const t = clock.getElapsedTime();
+  const time = performance.now();
+
+  // Smooth mouse
+  smoothMouseX += (targetMouseX - smoothMouseX) * 0.06;
+  smoothMouseY += (targetMouseY - smoothMouseY) * 0.06;
+
+  // Smooth scroll progress
+  const targetP = Math.min(2.0, Math.max(0.0, window.scrollY / window.innerHeight));
+  smoothScrollP += (targetP - smoothScrollP) * 0.08;
+
+  const easedP = easeInOutCubic(Math.min(1.0, smoothScrollP));
+  const isMobile = window.innerWidth <= 900;
+  const mobileZMult = isMobile ? 1.25 : 1.0;
+
+  // Interpolate camera between Intro (p=0) and Product/Reviews (p>=1)
+  // Intro: camZ=11.6, camY=1.1, lookY=0.55, bodyYaw=-0.42, head=(-0.6, 0.16, 0.22)
+  // Product/Reviews: camZ=6.9, camY=1.95, lookY=1.72, bodyYaw=-0.2, head=(-0.06, 0.04, 0)
+  const baseCamZ = THREE.MathUtils.lerp(11.6, 6.9, easedP) * mobileZMult;
+  const baseCamY = THREE.MathUtils.lerp(1.1, 1.95, easedP);
+  const lookTargetY = THREE.MathUtils.lerp(0.55, 1.72, easedP);
+
+  // Parallax on camera
+  camera.position.x = smoothMouseX * 0.25;
+  camera.position.y = baseCamY - smoothMouseY * 0.1;
+  camera.position.z = baseCamZ;
+  camera.lookAt(0, lookTargetY, 0);
+
+  // Body orientation & yaw
+  const baseBodyYaw = THREE.MathUtils.lerp(-0.42, -0.2, easedP);
+  robot.rotation.y = baseBodyYaw + smoothMouseX * 0.12;
+
+  // Head orientation (tracks pointer)
+  const baseHeadPitch = THREE.MathUtils.lerp(-0.6, -0.06, easedP);
+  const baseHeadYaw = THREE.MathUtils.lerp(0.16, 0.04, easedP);
+  const baseHeadRoll = THREE.MathUtils.lerp(0.22, 0.0, easedP);
+
+  headPivot.rotation.x = baseHeadPitch - smoothMouseY * 0.18 + Math.sin(t * 1.4) * 0.015;
+  headPivot.rotation.y = baseHeadYaw + smoothMouseX * 0.45;
+  headPivot.rotation.z = baseHeadRoll;
+
+  // Idle life: body bobbing
+  robot.position.y = Math.sin(t * 1.4) * 0.02;
+
+  // Gentle opposite arm swing
+  leftArm.rotation.z = -0.16 + Math.sin(t * 1.4) * 0.05;
+  rightArm.rotation.z = 0.16 - Math.sin(t * 1.4 + 1.0) * 0.05;
+
+  // Update Face Canvas
+  drawFaceCanvas(time, smoothScrollP);
+
+  renderer.render(scene, camera);
+}
+animate();
+
+</script>
+</body>
+</html>
